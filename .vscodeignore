@@ -1,0 +1,13 @@
+.git/**
+.vscode/**
+src/**
+test/**
+scripts/**
+samples/**
+tsconfig.json
+package-lock.json
+**/*.map
+**/__pycache__/**
+*.vsix
+.analysis-reports/**
+.analysis-report-*/**
