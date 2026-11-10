@@ -6,6 +6,7 @@ scripts/**
 samples/**
 tsconfig.json
 package-lock.json
+ca-bundle.crt
 **/*.map
 **/__pycache__/**
 *.vsix

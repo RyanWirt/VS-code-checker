@@ -39,6 +39,7 @@ In **User Settings**, configure:
 | `projectChecker.maxFileSizeMB` | `5` | Per-file limit, up to 20 MiB. |
 | `projectChecker.allowedExtensions` | `.md`, `.txt`, `.json`, `.pdf`, `.docx` | Additional extensions are parsed only as UTF-8 text. |
 | `projectChecker.requestTimeoutSeconds` | `120` | Network timeout including response reading, from 1 to 600 seconds. |
+| `projectChecker.caCertPath` | empty | Absolute path to a PEM file with an extra CA certificate for the endpoint. Added to the default trusted roots; verification stays on. |
 
 Settings are application-scoped so checked-in workspace settings cannot silently redirect the endpoint. HTTPS is required; **numeric loopback** HTTP (`127.0.0.1` or `[::1]`) is allowed for local development. Plain HTTP `localhost`, URL credentials, query strings, and fragments are rejected. Do not put credentials in any setting or URL; use a normally trusted TLS certificate and never disable TLS verification.
 
@@ -54,8 +55,11 @@ Set the base URL to `http://127.0.0.1:4000/v1`, the model to `mock-model`, and e
 
 ## Run an analysis
 
+Shortcut: click **Project Checker** in the status bar or run **Project Checker: Select Inputs and Analyze**. It performs the steps below in one go. The individual commands remain available.
+
 1. Run **Project Checker: Select Analysis Inputs**.
-2. Select at least one requirements document; select optional checklist JSON, then optional artifacts. Cancel at an optional picker to skip it. The first picker's cancellation leaves the previous selection unchanged.
+2. **Step 1:** select one or more requirements files (for example an ASTA checklist). **Step 2:** choose **Select code files**, **Select a project folder**, or **Skip**. Cancelling either step leaves the previous selection unchanged.
+   A project folder is scanned recursively for files with allowed extensions (add code extensions such as `.py` or `.ts` to `projectChecker.allowedExtensions`). `.json`, `.pdf` and `.docx` files, dot-directories (`.git`), build output (`node_modules`, `dist`, `build`, `out`, `target`, `venv`, `__pycache__`, `coverage`), symlinks and hard-linked files are skipped. The folder must stay under 2 MiB of text and about 180 files; otherwise choose a subfolder.
 3. Files are locally validated and extracted. Only paths are held between commands; inputs are reread and revalidated for each analysis. No persistent input cache is created.
 4. Run **Project Checker: Run Read-only Analysis**. For multi-root workspaces, choose the output workspace.
 5. Inspect the endpoint, model, input names and roles in the transmission confirmation. Approve only if you are authorized to send these contents to that provider.
@@ -71,7 +75,7 @@ The report contains summary/scope, selected input names and roles, non-secret mo
 - **Read-only inputs:** only user-selected regular files are opened, in read-only mode. There is no globbing, recursive scanning, terminal invocation, subprocess command, patch application, or model tool dispatcher in extension code. Parser workers run trusted local extraction code, never document scripts or macros.
 - **Restricted writes:** only a new report directory and exclusively created `report.md` are written. Creation uses restrictive permissions (`0700` directory, `0600` file where supported), no recursive mkdir, and no overwrite flags. No automatic cleanup deletes files. A disk/permission error or interruption can leave an empty directory or partial report; a later run always proposes a fresh directory.
 - **Path checks:** absolute local paths only; traversal components, symbolic-link path components, hardlinked inputs, special files and duplicate inputs are rejected. Output paths are generated internally, constrained to one direct child, confirmed, and revalidated before writing. File descriptors and inode/device checks reduce substitution races. Windows ACLs and case/filesystem behavior still apply.
-- **Resource limits:** 30 inputs, 20 MiB total raw input, 2 MiB total extracted UTF-8 text, 200 PDF pages, 1 MiB API response, and no automatic API retries. PDF/DOCX workers have a 15-second deadline and V8 heap limits. DOCX accepts at most 1,000 ZIP entries, with bounded declared expanded sizes and streamed XML bytes. These limits are safeguards, not a full native-memory sandbox.
+- **Resource limits:** 200 inputs, 20 MiB total raw input, 2 MiB total extracted UTF-8 text, 200 PDF pages, 1 MiB API response, and no automatic API retries. PDF/DOCX workers have a 15-second deadline and V8 heap limits. DOCX accepts at most 1,000 ZIP entries, with bounded declared expanded sizes and streamed XML bytes. These limits are safeguards, not a full native-memory sandbox.
 - **Extraction limitations:** PDF is text-only, without OCR. DOCX includes `word/document.xml` text only (Transitional and Strict namespaces), not headers/footers or attached files. Images, links, embedded objects, encrypted documents, macros, and external relationships are not followed. Malformed, empty, or oversized inputs fail closed. Custom formats must be plain UTF-8, not arbitrary binaries. Scanned PDFs require OCR outside the extension before selection; small amounts of extractable text can still yield incomplete evidence.
 - **Credentials:** the key is attached only to the API authorization header. Exact, JSON-escaped, URL-encoded and base64 forms are filtered from request content and report text as defense in depth. Never include credentials in selected inputs. Filtering cannot discover every secret or transformed fragment in a document.
 - **Network trust:** the configured endpoint receives selected extracted content and must be trusted. Redirects are rejected. There are no provider-error-body dialogs, document logs, or telemetry. The extension cannot control provider logs, retention, subprocesses internal to a provider, proxy behavior, or downstream model policies. Review your provider's privacy/retention terms before use.

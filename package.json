@@ -5,6 +5,7 @@
   "version": "0.1.0",
   "publisher": "RyanWirt",
   "license": "MIT",
+  "icon": "images/icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/RyanWirt/VS-code-checker."
@@ -17,8 +18,12 @@
     "Other"
   ],
   "main": "./dist/extension.js",
-  "extensionKind": ["ui"],
+  "extensionKind": [
+    "ui"
+  ],
   "activationEvents": [
+    "onStartupFinished",
+    "onCommand:projectChecker.analyze",
     "onCommand:projectChecker.configureApiKey",
     "onCommand:projectChecker.selectInputs",
     "onCommand:projectChecker.runAnalysis"
@@ -34,6 +39,10 @@
   "contributes": {
     "commands": [
       {
+        "command": "projectChecker.analyze",
+        "title": "Project Checker: Select Inputs and Analyze"
+      },
+      {
         "command": "projectChecker.configureApiKey",
         "title": "Project Checker: Configure API Key"
       },
@@ -44,6 +53,29 @@
       {
         "command": "projectChecker.runAnalysis",
         "title": "Project Checker: Run Read-only Analysis"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "projectChecker",
+          "title": "Project Checker",
+          "icon": "images/sidebar.svg"
+        }
+      ]
+    },
+    "views": {
+      "projectChecker": [
+        {
+          "id": "projectChecker.panel",
+          "name": "Project Checker"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "projectChecker.panel",
+        "contents": "Read-only analysis of requirements, checklists and artifacts.\n[Select Inputs and Analyze](command:projectChecker.analyze)\n[Configure API Key](command:projectChecker.configureApiKey)\nOr run the steps separately:\n[Select Analysis Inputs](command:projectChecker.selectInputs)\n[Run Analysis](command:projectChecker.runAnalysis)"
       }
     ],
     "configuration": {
@@ -91,6 +123,12 @@
           "maximum": 600,
           "scope": "application",
           "description": "API request timeout, including reading the response."
+        },
+        "projectChecker.caCertPath": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "description": "Absolute path to a PEM file with an additional CA certificate to trust for the LiteLLM endpoint. Added to the default trusted roots; TLS verification stays enabled."
         }
       }
     }
@@ -108,6 +146,7 @@
   "dependencies": {
     "pdfjs-dist": "6.5.438",
     "saxes": "6.0.0",
+    "undici": "7.30.2",
     "yauzl": "3.4.0"
   },
   "devDependencies": {

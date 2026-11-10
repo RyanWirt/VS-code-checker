@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { analyze, redact } from './client';
-import { Config, loadInputs, SafeError, Selection, validateConfig } from './inputs';
+import { Config, expandFolder, loadInputs, SafeError, Selection, validateConfig } from './inputs';
 import { createReport, proposeReport, renderReport } from './report';
 
 const KEY = 'projectChecker.litellmApiKey';
@@ -26,7 +26,8 @@ export function activate(context: vscode.ExtensionContext): void {
       model: settings.get<string>('model', 'gpt-4o-mini'),
       maxFileSizeMB: settings.get<number>('maxFileSizeMB', 5),
       allowedExtensions: settings.get<string[]>('allowedExtensions', ['.md', '.txt', '.json', '.pdf', '.docx']),
-      requestTimeoutSeconds: settings.get<number>('requestTimeoutSeconds', 120)
+      requestTimeoutSeconds: settings.get<number>('requestTimeoutSeconds', 120),
+      caCertPath: settings.get<string>('caCertPath', '') || undefined
     });
   };
   context.subscriptions.push(
@@ -42,27 +43,49 @@ export function activate(context: vscode.ExtensionContext): void {
       if (key) { await context.secrets.store(KEY, key); }
       else { await context.secrets.delete(KEY); }
       void vscode.window.showInformationMessage(key ? 'API key stored securely.' : 'Stored API key removed.');
-    })),
-    vscode.commands.registerCommand('projectChecker.selectInputs', guard(async () => {
+    }))
+  );
+  const selectInputs = async (): Promise<boolean> => {
       if (running) { throw new SafeError('Wait for the current analysis to finish.'); }
       const config = configuration();
       const next: Selection[] = [];
-      for (const role of ['requirements', 'checklist', 'artifact'] as const) {
-        const files = await vscode.window.showOpenDialog({
-          title: `Select ${role} inputs${role === 'requirements' ? ' (required)' : ' (optional; Cancel to skip)'}`,
+      const requirements = await vscode.window.showOpenDialog({
+        title: 'Step 1 of 2: Select requirements files',
+        canSelectMany: true, canSelectFiles: true, canSelectFolders: false,
+        filters: { 'Supported inputs': config.allowedExtensions.map(ext => ext.slice(1)) }
+      });
+      if (!requirements) { return false; }
+      const mode = await vscode.window.showQuickPick(
+        ['Select code files', 'Select a project folder', 'Skip (requirements only)'],
+        { title: 'Step 2 of 2: What should be checked against the requirements?', ignoreFocusOut: true }
+      );
+      if (!mode) { return false; }
+      let code: vscode.Uri[] | undefined = [];
+      if (mode === 'Select code files') {
+        code = await vscode.window.showOpenDialog({
+          title: 'Step 2 of 2: Select code files',
           canSelectMany: true, canSelectFiles: true, canSelectFolders: false,
-          filters: { 'Supported inputs': (role === 'checklist' ? ['.json'] : config.allowedExtensions).map(ext => ext.slice(1)) }
+          filters: { 'Supported inputs': config.allowedExtensions.map(ext => ext.slice(1)) }
         });
-        if (!files && role === 'requirements') { return; }
-        if (files?.some(file => file.scheme !== 'file')) { throw new SafeError('Only local files are supported.'); }
-        next.push(...(files ?? []).map(file => ({ path: file.fsPath, role })));
+        if (!code) { return false; }
+      } else if (mode === 'Select a project folder') {
+        code = await vscode.window.showOpenDialog({
+          title: 'Step 2 of 2: Select the project folder',
+          canSelectMany: false, canSelectFiles: false, canSelectFolders: true
+        });
+        if (!code) { return false; }
       }
+      if ([...requirements, ...code].some(file => file.scheme !== 'file')) { throw new SafeError('Only local files are supported.'); }
+      next.push(...requirements.map(file => ({ path: file.fsPath, role: 'requirements' as const })));
+      if (mode === 'Select a project folder') { next.push(...await expandFolder(code[0].fsPath, config)); }
+      else { next.push(...code.map(file => ({ path: file.fsPath, role: 'artifact' as const }))); }
       // Validate and extract without retaining document content between commands.
       await loadInputs(next, config);
       selected = next;
       void vscode.window.showInformationMessage(`${selected.length} inputs selected. Nothing has been transmitted.`);
-    })),
-    vscode.commands.registerCommand('projectChecker.runAnalysis', guard(async () => {
+      return true;
+  };
+  const runAnalysis = async (): Promise<void> => {
       if (running) { throw new SafeError('An analysis is already running.'); }
       if (!selected.length) { throw new SafeError('Use Select Analysis Inputs first.'); }
       running = true;
@@ -79,15 +102,16 @@ export function activate(context: vscode.ExtensionContext): void {
         const target = await proposeReport(folder.uri.fsPath);
         const inputs = await loadInputs(selected, config);
         const consent = await vscode.window.showWarningMessage(
-          'Send these selected inputs to the configured analysis service?',
+          `Send ${inputs.length} file${inputs.length === 1 ? '' : 's'} for analysis?`,
           {
             modal: true,
-            detail: redact(`Endpoint: ${config.baseUrl}\nModel: ${config.model}\n` +
-              inputs.map(input => `${input.id}: ${input.name} (${input.role})`).join('\n') +
-              '\nExtracted contents will leave VS Code. Only proceed if authorized; provider retention policies apply.', key)
-          }, 'Send selected inputs'
+            detail: redact(`Endpoint: ${config.baseUrl}\nModel: ${config.model}\n\n` +
+              inputs.slice(0, 20).map(input => `\u2022 ${input.name} (${input.role})`).join('\n') +
+              (inputs.length > 20 ? `\n...and ${inputs.length - 20} more` : '') +
+              '\n\nExtracted text will be sent to this service. Only continue if you are authorized to share it.', key)
+          }, 'Send'
         );
-        if (consent !== 'Send selected inputs') { return; }
+        if (consent !== 'Send') { return; }
         requireTrust();
         const analysis = await vscode.window.withProgress({
           location: vscode.ProgressLocation.Notification, title: 'Analyzing selected inputs (read-only)', cancellable: true
@@ -101,20 +125,36 @@ export function activate(context: vscode.ExtensionContext): void {
         const report = renderReport(analysis, inputs, config, key);
         const output = await createReport(target, report, async directory =>
           await vscode.window.showWarningMessage(
-            'Create this report folder and its single report.md?',
+            'Save the report?',
             {
               modal: true,
-              detail: redact(`${directory}\n\nThe report includes model-generated descriptions, evidence, and selected filenames, which may disclose sensitive input information despite filtering. Approve only if you explicitly authorize including that information. Existing files will not be overwritten.`, key)
-            }, 'Approve report content and path'
-          ) === 'Approve report content and path'
+              detail: redact(`A new folder with one report.md will be created:\n${directory}\n\nThe report contains model-generated findings and file names, which may reveal sensitive details from your inputs. Nothing existing is overwritten.`, key)
+            }, 'Save report'
+          ) === 'Save report'
         );
         if (output) {
           void vscode.window.showInformationMessage('Read-only analysis report created.');
           await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(output)), { preview: true });
         }
       } finally { running = false; }
+  };
+  context.subscriptions.push(
+    vscode.commands.registerCommand('projectChecker.selectInputs', guard(async () => { await selectInputs(); })),
+    vscode.commands.registerCommand('projectChecker.runAnalysis', guard(runAnalysis)),
+    vscode.commands.registerCommand('projectChecker.analyze', guard(async () => {
+      if (await selectInputs()) { await runAnalysis(); }
     }))
   );
+  const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
+  statusBar.text = '$(checklist) Project Checker';
+  statusBar.tooltip = 'Select inputs and run a read-only analysis';
+  statusBar.command = 'projectChecker.analyze';
+  statusBar.show();
+  context.subscriptions.push(statusBar);
+  context.subscriptions.push(vscode.window.registerTreeDataProvider('projectChecker.panel', {
+    getTreeItem: item => item,
+    getChildren: () => []
+  }));
 }
 
 export function deactivate(): void {}

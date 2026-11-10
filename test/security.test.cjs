@@ -5,7 +5,7 @@ const path = require('node:path');
 const os = require('node:os');
 const http = require('node:http');
 const { randomUUID } = require('node:crypto');
-const { loadInputs, validatePath, validateConfig, MAX_TEXT_BYTES } = require('../dist/inputs');
+const { loadInputs, expandFolder, validatePath, validateConfig, MAX_TEXT_BYTES } = require('../dist/inputs');
 const { analyze, parseAnalysis, redact } = require('../dist/client');
 const { proposeReport, createReport, renderReport } = require('../dist/report');
 
@@ -101,6 +101,22 @@ test('only selected supported regular UTF-8 files are read; invalid inputs fail 
   await assert.rejects(loadInputs(selection, config), /extracted/);
   await fs.writeFile(requirements, ' \n');
   await assert.rejects(loadInputs(selection, config), /extractable text/);
+});
+
+test('folder expansion skips build output, dot-directories, links, and unsupported files', async t => {
+  const root = await temporary(t);
+  const project = path.join(root, 'project');
+  for (const dir of ['src', 'node_modules/pkg', '.git', 'dist']) { await fs.mkdir(path.join(project, dir), { recursive: true }); }
+  await Promise.all([
+    ['src/app.py', 'print(1)'], ['README.md', '# hi'], ['node_modules/pkg/a.md', 'x'], ['.git/b.md', 'x'],
+    ['dist/c.md', 'x'], ['src/data.json', '{}'], ['src/skip.bin', 'x']
+  ].map(([name, text]) => fs.writeFile(path.join(project, name), text)));
+  await fs.link(path.join(project, 'README.md'), path.join(project, 'src/hard.md'));
+  const files = await expandFolder(project, { ...config, allowedExtensions: [...config.allowedExtensions, '.py'] });
+  assert.deepEqual(files.map(file => file.label), ['src/app.py']);
+  assert.ok(files.every(file => file.role === 'artifact'));
+  await assert.rejects(expandFolder(project, config), /No supported/);
+  await assert.rejects(expandFolder(path.join(project, 'README.md'), config));
 });
 
 test('symlink, symlink ancestor, hardlink, and directory inputs are rejected', async t => {

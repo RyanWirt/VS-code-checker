@@ -30,12 +30,13 @@ async function main() {
     },
     Uri: { file: toUri },
     ProgressLocation: { Notification: 15 },
+    StatusBarAlignment: { Left: 1 },
     window: {
+      createStatusBarItem: () => ({ show() {}, dispose() {} }),
+      registerTreeDataProvider: () => ({ dispose() {} }),
       showInputBox: async options => { assert.equal(options.password, true); return key; },
-      showOpenDialog: async () => {
-        if (picker < 2) { return [toUri(samplePaths[picker++])]; }
-        return artifacts.length ? artifacts.map(toUri) : undefined;
-      },
+      showOpenDialog: async () => picker++ === 0 ? samplePaths.map(toUri) : artifacts.map(toUri),
+      showQuickPick: async items => artifacts.length ? items[0] : items[2],
       showErrorMessage: message => errors.push(message),
       showInformationMessage() {},
       showWarningMessage: async (message, options, choice) => {
@@ -89,7 +90,7 @@ async function main() {
   }
   vscode.env.remoteName = 'ssh-remote';
   for (const command of commands.values()) { await command(); }
-  assert.equal(errors.length, 3);
+  assert.equal(errors.length, 4);
   assert.ok(errors.every(error => error.includes('Remote extension environments')));
   assert.equal(confirmations.length, 2);
   assert.equal(secrets.size, 1);

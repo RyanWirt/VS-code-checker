@@ -1,4 +1,7 @@
-import { Config, Input, SafeError, validateConfig } from './inputs';
+import * as fs from 'node:fs/promises';
+import * as tls from 'node:tls';
+import { Agent, fetch as undiciFetch } from 'undici';
+import { assertNoSymlinks, Config, Input, SafeError, validateConfig } from './inputs';
 
 export const SEVERITIES = ['Critical', 'High', 'Medium', 'Low', 'Informational'] as const;
 export interface Finding {
@@ -124,6 +127,17 @@ async function responseText(response: Response, signal: AbortSignal): Promise<st
   } finally { await reader.cancel().catch(() => undefined); }
 }
 
+async function loadCa(filePath: string): Promise<string> {
+  try {
+    await assertNoSymlinks(filePath);
+    const stat = await fs.stat(filePath);
+    if (!stat.isFile() || stat.size > 1024 * 1024) { throw new Error(); }
+    const pem = await fs.readFile(filePath, 'utf8');
+    if (!pem.includes('-----BEGIN CERTIFICATE-----')) { throw new Error(); }
+    return pem;
+  } catch { throw new SafeError('CA certificate must be a readable PEM file (max 1 MiB) at a symlink-free local path.'); }
+}
+
 export async function analyze(
   inputs: Input[], config: Config, apiKey: string, cancellation?: AbortSignal
 ): Promise<Analysis> {
@@ -135,9 +149,14 @@ export async function analyze(
     AbortSignal.timeout(config.requestTimeoutSeconds * 1000),
     ...(cancellation ? [cancellation] : [])
   ]);
+  const dispatcher = config.caCertPath
+    ? new Agent({ connect: { ca: [...tls.rootCertificates, await loadCa(config.caCertPath)] } })
+    : undefined;
+  const send = (dispatcher ? undiciFetch : fetch) as typeof fetch;
   try {
-    const response = await fetch(`${config.baseUrl}/chat/completions`, {
+    const response = await send(`${config.baseUrl}/chat/completions`, {
       method: 'POST',
+      ...(dispatcher ? { dispatcher } : {}),
       redirect: 'error',
       credentials: 'omit',
       signal,
@@ -188,5 +207,5 @@ export async function analyze(
   } catch (error) {
     if (error instanceof SafeError) { throw error; }
     throw new SafeError('Analysis failed or was cancelled. No server error details or input content were logged.');
-  }
+  } finally { await dispatcher?.close().catch(() => undefined); }
 }

@@ -8,8 +8,9 @@ import { Worker } from 'node:worker_threads';
 export class SafeError extends Error {}
 export const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
 export const MAX_TEXT_BYTES = 2 * 1024 * 1024;
+export const MAX_INPUTS = 200;
 export type Role = 'requirements' | 'checklist' | 'artifact';
-export interface Selection { path: string; role: Role }
+export interface Selection { path: string; role: Role; label?: string }
 export interface Input { id: string; name: string; role: Role; content: string | object }
 export interface Config {
   baseUrl: string;
@@ -17,6 +18,7 @@ export interface Config {
   maxFileSizeMB: number;
   allowedExtensions: string[];
   requestTimeoutSeconds: number;
+  caCertPath?: string;
 }
 
 export function validateConfig(config: Config): Config {
@@ -35,6 +37,7 @@ export function validateConfig(config: Config): Config {
       config.allowedExtensions.some(ext => typeof ext !== 'string' || !/^\.[a-z0-9]{1,16}$/u.test(ext))) {
     throw new SafeError('Invalid model, size, timeout, or extension configuration.');
   }
+  if (config.caCertPath) { validatePath(config.caCertPath); }
   return { ...config, baseUrl: url.href.replace(/\/$/u, '') };
 }
 
@@ -189,9 +192,9 @@ function extractInWorker(data: Buffer, extension: string): Promise<string> {
 
 export async function loadInputs(selections: Selection[], config: Config): Promise<Input[]> {
   validateConfig(config);
-  if (!selections.length || selections.length > 30 ||
+  if (!selections.length || selections.length > MAX_INPUTS ||
       !selections.some(selection => selection.role === 'requirements')) {
-    throw new SafeError('Select requirements and at most 30 total inputs.');
+    throw new SafeError(`Select requirements and at most ${MAX_INPUTS} total inputs.`);
   }
   const seen = new Set<string>();
   const result: Input[] = [];
@@ -246,7 +249,44 @@ export async function loadInputs(selections: Selection[], config: Config): Promi
         content = parsed;
       } catch { throw new SafeError('JSON inputs must contain a valid object or array.'); }
     }
-    result.push({ id: `input-${result.length + 1}`, name: path.basename(selection.path), role: selection.role, content });
+    result.push({ id: `input-${result.length + 1}`, name: selection.label ?? path.basename(selection.path), role: selection.role, content });
   }
   return result;
+}
+
+const SKIPPED_DIRS = new Set(['node_modules', 'dist', 'build', 'out', 'target', '__pycache__', 'venv', 'coverage']);
+// Structured/binary formats need strict parsing, so folder scans cover plain-text and code files only.
+const FOLDER_EXCLUDED = new Set(['.json', '.pdf', '.docx']);
+
+// Expands an explicitly chosen folder into file selections; links, dot-directories and build output are skipped.
+export async function expandFolder(root: string, config: Config): Promise<Selection[]> {
+  validateConfig(config);
+  await assertNoSymlinks(root);
+  if (!(await fs.lstat(root)).isDirectory()) { throw new SafeError('Select a folder.'); }
+  const found: Selection[] = [];
+  let bytes = 0;
+  let scanned = 0;
+  const walk = async (dir: string, depth: number): Promise<void> => {
+    if (depth > 10) { return; }
+    for (const name of (await fs.readdir(dir)).sort()) {
+      if (++scanned > 20_000) { throw new SafeError('Folder has too many entries. Choose a smaller folder.'); }
+      const full = path.join(dir, name);
+      const stat = await fs.lstat(full);
+      if (stat.isDirectory()) {
+        if (!name.startsWith('.') && !SKIPPED_DIRS.has(name)) { await walk(full, depth + 1); }
+        continue;
+      }
+      const ext = path.extname(name).toLowerCase();
+      if (!stat.isFile() || stat.nlink !== 1 || stat.size === 0 || stat.size > config.maxFileSizeMB * 1024 * 1024 ||
+          FOLDER_EXCLUDED.has(ext) || !config.allowedExtensions.includes(ext)) { continue; }
+      bytes += stat.size;
+      if (found.length >= MAX_INPUTS - 20 || bytes > MAX_TEXT_BYTES) {
+        throw new SafeError('Folder has too many files or too much text (limit 2 MiB). Choose a smaller folder or subfolder.');
+      }
+      found.push({ path: full, role: 'artifact', label: path.relative(root, full).split(path.sep).join('/') });
+    }
+  };
+  await walk(root, 0);
+  if (!found.length) { throw new SafeError('No supported code or text files were found in that folder.'); }
+  return found;
 }
