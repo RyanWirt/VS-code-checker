@@ -44,6 +44,7 @@ class Handler(BaseHTTPRequestHandler):
                 artifacts = [item["content"] for item in inputs if item["role"] == "artifact"]
                 assert any("Sample PDF requirement" in text for text in artifacts)
                 assert any("Sample DOCX requirement" in text for text in artifacts)
+                assert any("Strict DOCX requirement" in text for text in artifacts)
             finding = {
                 "id": "F-001", "severity": "Informational", "status": "human-review",
                 "reference": "REQ-001", "inputId": inputs[0]["id"], "line": None,
@@ -85,6 +86,13 @@ def create_document_fixtures(directory):
             '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
             "<w:body><w:p><w:r><w:t>Sample DOCX requirement</w:t></w:r></w:p></w:body></w:document>",
         )
+    strict_docx = root / "strict-artifact.docx"
+    with zipfile.ZipFile(strict_docx, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "word/document.xml",
+            '<w:document xmlns:w="http://purl.oclc.org/ooxml/wordprocessingml/main">'
+            "<w:body><w:p><w:r><w:t>Strict DOCX requirement</w:t></w:r></w:p></w:body></w:document>",
+        )
     stream = b"BT /F1 12 Tf 72 720 Td (Sample PDF requirement) Tj ET"
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
@@ -106,7 +114,7 @@ def create_document_fixtures(directory):
     pdf.extend(f"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode())
     pdf_path = root / "artifact.pdf"
     pdf_path.write_bytes(pdf)
-    return [str(pdf_path), str(docx)]
+    return [str(pdf_path), str(docx), str(strict_docx)]
 
 
 def main():

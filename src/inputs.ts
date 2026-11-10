@@ -102,17 +102,20 @@ function docxText(data: Buffer): Promise<string> {
           const parser = new SaxesParser({ xmlns: true });
           let text = '';
           let inText = false;
-          const wordNamespace = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+          const wordNamespaces = new Set([
+            'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
+            'http://purl.oclc.org/ooxml/wordprocessingml/main'
+          ]);
           parser.on('doctype', () => { throw new Error(); });
           parser.on('opentag', tag => {
-            if (tag.uri !== wordNamespace) { return; }
+            if (!wordNamespaces.has(tag.uri)) { return; }
             if (tag.local === 't') { inText = true; }
             if (tag.local === 'tab') { text += '\t'; }
             if (tag.local === 'br') { text += '\n'; }
           });
           parser.on('text', value => { if (inText) { text += value; } });
           parser.on('closetag', tag => {
-            if (tag.uri !== wordNamespace) { return; }
+            if (!wordNamespaces.has(tag.uri)) { return; }
             if (tag.local === 't') { inText = false; }
             if (tag.local === 'p') { text += '\n'; }
           });
@@ -232,6 +235,7 @@ export async function loadInputs(selections: Selection[], config: Config): Promi
       total += bytes;
     } finally { await handle.close(); }
     const text = ext === '.pdf' || ext === '.docx' ? await extractInWorker(data, ext) : decodeText(data);
+    if (!text.trim()) { throw new SafeError('Selected inputs must contain extractable text. Scanned PDFs require OCR before selection.'); }
     extracted += Buffer.byteLength(text);
     if (extracted > MAX_TEXT_BYTES) { throw new SafeError('Total extracted input exceeds 2 MiB.'); }
     let content: string | object = text;

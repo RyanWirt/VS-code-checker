@@ -9,6 +9,7 @@ export function activate(context: vscode.ExtensionContext): void {
   let selected: Selection[] = [];
   let running = false;
   const requireTrust = () => {
+    if (vscode.env.remoteName !== undefined) { throw new SafeError('Remote extension environments are not supported. Use a local VS Code window.'); }
     if (!vscode.workspace.isTrusted) { throw new SafeError('A trusted local workspace is required.'); }
   };
   const guard = (action: () => Promise<void>) => async () => {

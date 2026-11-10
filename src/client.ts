@@ -45,8 +45,19 @@ export function redact(value: string, key: string): string {
   if (!key) { return value; }
   for (const secret of new Set([
     key, JSON.stringify(key).slice(1, -1), encodeURIComponent(key), Buffer.from(key).toString('base64')
-  ])) {
+  ].sort((a, b) => b.length - a.length))) {
     value = value.split(secret).join('[REDACTED]');
+  }
+  return value;
+}
+
+function redactDocument(value: unknown, key: string, depth = 0): unknown {
+  if (depth > 64) { throw new SafeError('JSON input nesting exceeds the supported limit.'); }
+  if (typeof value === 'string') { return redact(value, key); }
+  if (Array.isArray(value)) { return value.map(item => redactDocument(item, key, depth + 1)); }
+  if (object(value)) {
+    return Object.fromEntries(Object.entries(value).map(([name, item]) =>
+      [redact(name, key), redactDocument(item, key, depth + 1)]));
   }
   return value;
 }
@@ -138,9 +149,11 @@ export async function analyze(
           {
             role: 'user',
             // Paths and filenames are not needed by the model; references use opaque IDs.
-            content: redact(JSON.stringify({
-              inputs: inputs.map(({ id, role, content }) => ({ id, role, content }))
-            }), apiKey)
+            content: JSON.stringify({
+              inputs: inputs.map(({ id, role, content }) => ({
+                id, role, content: redactDocument(content, apiKey)
+              }))
+            })
           }
         ],
         response_format: { type: 'json_object' },
@@ -158,7 +171,20 @@ export async function analyze(
         envelope.choices[0].finish_reason !== 'stop' || envelope.choices[0].message.tool_calls) {
       throw new SafeError('API response was incomplete or unsupported. No report was created.');
     }
-    return parseAnalysis(JSON.parse(redact(envelope.choices[0].message.content, apiKey)), inputs);
+    const result = parseAnalysis(JSON.parse(envelope.choices[0].message.content), inputs);
+    return {
+      summary: redact(result.summary, apiKey),
+      findings: result.findings.map(finding => ({
+        ...finding,
+        reference: redact(finding.reference, apiKey),
+        description: redact(finding.description, apiKey),
+        evidence: redact(finding.evidence, apiKey),
+        remediation: redact(finding.remediation, apiKey)
+      })),
+      assumptions: result.assumptions.map(value => redact(value, apiKey)),
+      limitations: result.limitations.map(value => redact(value, apiKey)),
+      questions: result.questions.map(value => redact(value, apiKey))
+    };
   } catch (error) {
     if (error instanceof SafeError) { throw error; }
     throw new SafeError('Analysis failed or was cancelled. No server error details or input content were logged.');

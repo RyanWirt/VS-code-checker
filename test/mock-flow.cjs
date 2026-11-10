@@ -21,6 +21,7 @@ async function main() {
   let picker = 0;
   let opened;
   const vscode = {
+    env: {},
     commands: { registerCommand(name, callback) { commands.set(name, callback); return { dispose() {} }; } },
     workspace: {
       isTrusted: true, workspaceFolders: [{ uri: toUri(root) }],
@@ -86,6 +87,13 @@ async function main() {
   for (let i = 0; i < samplePaths.length; i++) {
     assert.deepEqual(await fs.readFile(samplePaths[i]), originals[i]);
   }
+  vscode.env.remoteName = 'ssh-remote';
+  for (const command of commands.values()) { await command(); }
+  assert.equal(errors.length, 3);
+  assert.ok(errors.every(error => error.includes('Remote extension environments')));
+  assert.equal(confirmations.length, 2);
+  assert.equal(secrets.size, 1);
+  assert.deepEqual(await fs.readdir(outputDir), ['report.md']);
   console.log('Extension command flow verified: secure key, selected inputs, API request, consent, single report, unchanged originals.');
 }
 main().catch(() => {

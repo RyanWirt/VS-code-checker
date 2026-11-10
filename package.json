@@ -17,6 +17,7 @@
     "Other"
   ],
   "main": "./dist/extension.js",
+  "extensionKind": ["ui"],
   "activationEvents": [
     "onCommand:projectChecker.configureApiKey",
     "onCommand:projectChecker.selectInputs",

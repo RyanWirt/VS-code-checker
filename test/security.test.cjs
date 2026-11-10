@@ -99,6 +99,8 @@ test('only selected supported regular UTF-8 files are read; invalid inputs fail 
   await assert.rejects(loadInputs(selection, { ...config, maxFileSizeMB: 0.01 }), /size limit/);
   await fs.writeFile(requirements, 'x'.repeat(MAX_TEXT_BYTES + 1));
   await assert.rejects(loadInputs(selection, config), /extracted/);
+  await fs.writeFile(requirements, ' \n');
+  await assert.rejects(loadInputs(selection, config), /extractable text/);
 });
 
 test('symlink, symlink ancestor, hardlink, and directory inputs are rejected', async t => {
@@ -254,4 +256,25 @@ test('user cancellation aborts the API request', async t => {
   const controller = new AbortController();
   controller.abort();
   await assert.rejects(analyze([input], { ...config, baseUrl }, randomUUID(), controller.signal), /cancelled/);
+});
+
+test('redaction preserves structured JSON with backslash keys and schema-name keys', async t => {
+  for (const key of ['\\dummy', 'summary']) {
+    await t.test(key === 'summary' ? 'schema word' : 'escaped characters', async sub => {
+      const baseUrl = await server(sub, async (request, response) => {
+        let raw = '';
+        for await (const chunk of request) { raw += chunk; }
+        const body = JSON.parse(raw);
+        const document = JSON.parse(body.messages[1].content).inputs[0];
+        assert.deepEqual(Object.keys(document), ['id', 'role', 'content']);
+        assert.deepEqual(document.content, { '[REDACTED]': '[REDACTED]' });
+        respond(response, {
+          ...analysis, summary: key,
+          findings: [{ ...analysis.findings[0], line: null }]
+        });
+      });
+      const result = await analyze([{ ...input, content: { [key]: key } }], { ...config, baseUrl }, key);
+      assert.equal(result.summary, '[REDACTED]');
+    });
+  }
 });
