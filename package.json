@@ -1,0 +1,119 @@
+{
+  "name": "read-only-project-checker",
+  "displayName": "Read-only Project Checker",
+  "description": "Analyze explicitly selected requirements, ASTA checklists and artifacts using LiteLLM.",
+  "version": "0.1.0",
+  "publisher": "RyanWirt",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RyanWirt/VS-code-checker."
+  },
+  "engines": {
+    "vscode": "^1.110.0",
+    "node": ">=22.13.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onCommand:projectChecker.configureApiKey",
+    "onCommand:projectChecker.selectInputs",
+    "onCommand:projectChecker.runAnalysis"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    },
+    "virtualWorkspaces": {
+      "supported": false
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "projectChecker.configureApiKey",
+        "title": "Project Checker: Configure API Key"
+      },
+      {
+        "command": "projectChecker.selectInputs",
+        "title": "Project Checker: Select Analysis Inputs"
+      },
+      {
+        "command": "projectChecker.runAnalysis",
+        "title": "Project Checker: Run Read-only Analysis"
+      }
+    ],
+    "configuration": {
+      "title": "Read-only Project Checker",
+      "properties": {
+        "projectChecker.baseUrl": {
+          "type": "string",
+          "default": "https://localhost:4000/v1",
+          "scope": "application",
+          "description": "LiteLLM base URL (ending in /v1 if required). HTTPS required except HTTP loopback for local testing. No credentials, query or fragment."
+        },
+        "projectChecker.model": {
+          "type": "string",
+          "default": "gpt-4o-mini",
+          "scope": "application",
+          "description": "LiteLLM model or deployment name."
+        },
+        "projectChecker.maxFileSizeMB": {
+          "type": "number",
+          "default": 5,
+          "minimum": 0.01,
+          "maximum": 20,
+          "scope": "application",
+          "description": "Maximum size per selected input. Total input and extracted text are also bounded."
+        },
+        "projectChecker.allowedExtensions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            ".md",
+            ".txt",
+            ".json",
+            ".pdf",
+            ".docx"
+          ],
+          "scope": "application",
+          "description": "Allowed extensions including dot. Additional types must contain UTF-8 text."
+        },
+        "projectChecker.requestTimeoutSeconds": {
+          "type": "number",
+          "default": 120,
+          "minimum": 1,
+          "maximum": 600,
+          "scope": "application",
+          "description": "API request timeout, including reading the response."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "vscode:prepublish": "npm run compile",
+    "test": "npm run compile && node --test test/*.test.cjs",
+    "verify:mock": "npm run compile && python3 scripts/mock_litellm.py --verify",
+    "package": "vsce package --target linux-x64"
+  },
+  "overrides": {
+    "minimatch": "^11.0.1"
+  },
+  "dependencies": {
+    "pdfjs-dist": "6.5.438",
+    "saxes": "6.0.0",
+    "yauzl": "3.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/vscode": "1.110.0",
+    "@types/yauzl": "3.4.0",
+    "@vscode/vsce": "4.1.0",
+    "typescript": "7.0.2"
+  }
+}

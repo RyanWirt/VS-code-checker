@@ -1,0 +1,16 @@
+{
+  "name": "Minimal ASTA example",
+  "version": "1",
+  "items": [
+    {
+      "id": "ASTA-001",
+      "requirement": "REQ-001",
+      "criterion": "Credentials are held in secure storage and are absent from logs."
+    },
+    {
+      "id": "ASTA-002",
+      "requirement": "REQ-002",
+      "criterion": "Analysis never modifies pre-existing workspace files."
+    }
+  ]
+}
